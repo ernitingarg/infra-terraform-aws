@@ -1,0 +1,22 @@
+# Local .terraform directories
+**/.terraform/
+
+# .tfstate files
+*.tfstate
+*.tfstate.*
+
+# .tfplan files
+*.tfplan
+
+# Crash log files
+crash.log
+
+# .tfvars files that are meant to be customized
+*.auto.tfvars
+*.auto.tfvars.json
+
+# Local .git directories
+**/.git/
+
+# Lock file
+.terraform.lock.*
