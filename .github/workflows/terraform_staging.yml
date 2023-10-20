@@ -1,0 +1,80 @@
+name: Terraform Apply For staging
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  terraform:
+    runs-on: ubuntu-latest
+    env:
+      AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+      INFRACOST_API_KEY: ${{ secrets.INFRACOST_API_KEY }}
+    defaults:
+      run:
+        working-directory: projects/my-project/staging
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v1
+
+      - name: Setup Infracost
+        uses: infracost/actions/setup@v2
+        with:
+          api-key: ${{ env.INFRACOST_API_KEY }}
+
+      - name: Extract AWS Region from backend.conf
+        id: extract-region
+        run: |
+          region=$(grep -oP 'region\s*=\s*"\K[^"]+' backend.conf)
+          echo "AWS_REGION=$region" >> $GITHUB_ENV
+
+      - name: Configure AWS CLI
+        uses: aws-actions/configure-aws-credentials@v1
+        with:
+          aws-access-key-id: ${{ env.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ env.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Terraform Init
+        run: terraform init -backend-config="backend.conf"
+
+      - name: Terraform Validate
+        run: terraform validate -no-color
+
+      - name: Terraform Plan
+        run: terraform plan -out tfplan.binary -no-color
+
+      - name: Terraform show
+        run: terraform show -json tfplan.binary > plan.json -no-color
+
+      - name: Generate Infracost
+        run: |
+          infracost breakdown --path plan.json \
+                              --format json \
+                              --out-file /tmp/infracost.json
+
+      - name: Post Infracost comment
+        if: github.event_name == 'pull_request'
+        run: |
+          infracost comment github --path /tmp/infracost.json \
+                                   --repo $GITHUB_REPOSITORY \
+                                   --github-token ${{github.token}} \
+                                   --pull-request ${{github.event.pull_request.number}} \
+                                   --behavior update
+
+      - name: Terraform Apply on Push to main
+        if: github.event_name == 'push'
+        run: terraform apply -auto-approve -no-color
